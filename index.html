@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Minha Localização</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#2f3ba2">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-512.png">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+  <style>
+    body { font-family: Arial; padding: 1rem; text-align: center; background: #f2f2f2; }
+    #map { height: 400px; width: 100%; max-width: 600px; margin: 1rem auto; border-radius: 10px; }
+  </style>
+</head>
+<body>
+  <h2>Minha Localização Atual</h2>
+  <p><strong>Latitude:</strong> <span id="lat">...</span></p>
+  <p><strong>Longitude:</strong> <span id="lon">...</span></p>
+  <p id="status">Solicitando localização...</p>
+  <div id="map"></div>
+  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js');
+    }
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        function(position) {
+          const lat = position.coords.latitude;
+          const lon = position.coords.longitude;
+          document.getElementById('lat').textContent = lat;
+          document.getElementById('lon').textContent = lon;
+          document.getElementById('status').textContent = "Localização obtida com sucesso!";
+          const map = L.map('map').setView([lat, lon], 16);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+          }).addTo(map);
+          L.marker([lat, lon]).addTo(map).bindPopup("Você está aqui!").openPopup();
+        },
+        function(error) {
+          document.getElementById('status').textContent = "Erro: " + error.message;
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    }
+  </script>
+</body>
+</html>
