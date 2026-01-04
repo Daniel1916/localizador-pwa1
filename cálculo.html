@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Notas</title>
+
+<style>
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #f5f5f5;
+    color: #111;
+}
+
+/* ===== CAMUFLAGEM ===== */
+.camuflado header {
+    background: #1976d2;
+}
+.camuflado header::after {
+    content: "Notas";
+}
+.camuflado header span {
+    display: none;
+}
+
+/* ===== TOP BAR ===== */
+header {
+    background: #111;
+    color: #fff;
+    padding: 14px;
+    text-align: center;
+    font-size: 18px;
+}
+header span {
+    font-weight: bold;
+}
+
+/* ===== AUTH ===== */
+#auth {
+    padding: 40px 20px;
+    text-align: center;
+}
+
+/* ===== APP ===== */
+#app {
+    padding: 12px;
+}
+
+/* Busca */
+#busca {
+    width: 100%;
+    padding: 12px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+}
+
+/* Categoria */
+select {
+    width: 100%;
+    padding: 12px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+}
+
+/* Cards */
+.card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 8px;
+    border: 1px solid #ddd;
+}
+.card.selected {
+    border-color: #1976d2;
+}
+.card-title {
+    font-weight: bold;
+}
+.card-row {
+    font-size: 13px;
+    color: #555;
+}
+
+/* Footer */
+footer {
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    background: #eee;
+    padding: 10px;
+    display: flex;
+    gap: 6px;
+}
+footer button {
+    flex: 1;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: #1976d2;
+    color: #fff;
+    font-size: 13px;
+}
+
+/* Toast */
+#toast {
+    visibility: hidden;
+    background: #333;
+    color: #fff;
+    padding: 12px 18px;
+    border-radius: 8px;
+    position: fixed;
+    bottom: 90px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+#toast.show { visibility: visible; }
+
+.hidden { display: none; }
+</style>
+</head>
+
+<body class="camuflado">
+
+<header><span>🔐 Secure Vault</span></header>
+
+<div id="auth">
+    <button onclick="autenticar()">Abrir</button>
+</div>
+
+<div id="app" class="hidden">
+    <input id="busca" placeholder="Buscar..." oninput="render()">
+    <select id="categoria" onchange="render()">
+        <option value="">Todas categorias</option>
+    </select>
+    <div id="lista"></div>
+</div>
+
+<footer class="hidden" id="acoes">
+    <button onclick="copiarUsuario()">Usuário</button>
+    <button onclick="copiarSenha()">Senha</button>
+    <button onclick="exportar()">Exportar</button>
+    <button onclick="importar()">Importar</button>
+</footer>
+
+<div id="toast"></div>
+<input type="file" id="file" accept=".json" hidden>
+
+<script>
+/* ================= CONFIG ================= */
+const TEMPO_CLIPBOARD = 15; // segundos
+let senhaMestre = "";
+
+/* ================= DADOS ================= */
+let dados = [
+    { categoria:"Email", descricao:"Corporativo", usuario:"usuario@ncs.com", senha:"Senha@123" },
+    { categoria:"Servidor", descricao:"Linux", usuario:"root", senha:"Root!Pass" }
+];
+
+let selecionado = null;
+
+/* ================= TOAST ================= */
+function toast(m) {
+    const t = document.getElementById("toast");
+    t.innerText = m;
+    t.className = "show";
+    setTimeout(()=>t.className="",2000);
+}
+
+/* ================= AES ================= */
+async function aesKey(pass) {
+    return crypto.subtle.importKey(
+        "raw",
+        new TextEncoder().encode(pass),
+        { name: "PBKDF2" },
+        false,
+        ["deriveKey"]
+    );
+}
+
+async function criptografar(txt) {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const keyMat = await aesKey(senhaMestre);
+    const key = await crypto.subtle.deriveKey(
+        { name:"PBKDF2", salt, iterations:100000, hash:"SHA-256" },
+        keyMat,
+        { name:"AES-GCM", length:256 },
+        false,
+        ["encrypt"]
+    );
+    const enc = await crypto.subtle.encrypt(
+        { name:"AES-GCM", iv },
+        key,
+        new TextEncoder().encode(txt)
+    );
+    return JSON.stringify({
+        s:Array.from(salt),
+        i:Array.from(iv),
+        d:Array.from(new Uint8Array(enc))
+    });
+}
+
+async function descriptografar(json) {
+    const o = JSON.parse(json);
+    const keyMat = await aesKey(senhaMestre);
+    const key = await crypto.subtle.deriveKey(
+        { name:"PBKDF2", salt:new Uint8Array(o.s), iterations:100000, hash:"SHA-256" },
+        keyMat,
+        { name:"AES-GCM", length:256 },
+        false,
+        ["decrypt"]
+    );
+    const dec = await crypto.subtle.decrypt(
+        { name:"AES-GCM", iv:new Uint8Array(o.i) },
+        key,
+        new Uint8Array(o.d)
+    );
+    return new TextDecoder().decode(dec);
+}
+
+/* ================= RENDER ================= */
+function render() {
+    const busca = document.getElementById("busca").value.toLowerCase();
+    const cat = document.getElementById("categoria").value;
+    const lista = document.getElementById("lista");
+    lista.innerHTML = "";
+    dados.filter(d =>
+        (!cat || d.categoria===cat) &&
+        (d.descricao+d.usuario).toLowerCase().includes(busca)
+    ).forEach((d,i)=>{
+        const c=document.createElement("div");
+        c.className="card";
+        c.onclick=()=>{selecionado=i;render()};
+        if(selecionado===i) c.classList.add("selected");
+        c.innerHTML=`
+            <div class="card-title">${d.descricao}</div>
+            <div class="card-row">${d.usuario}</div>
+            <div class="card-row">••••••</div>`;
+        lista.appendChild(c);
+    });
+}
+
+/* ================= CATEGORIAS ================= */
+function carregarCategorias() {
+    const sel=document.getElementById("categoria");
+    sel.innerHTML='<option value="">Todas categorias</option>';
+    [...new Set(dados.map(d=>d.categoria))].forEach(c=>{
+        const o=document.createElement("option");
+        o.value=c;o.innerText=c;sel.appendChild(o);
+    });
+}
+
+/* ================= COPIAR ================= */
+function copiarUsuario() {
+    if(selecionado==null) return toast("Selecione");
+    navigator.clipboard.writeText(dados[selecionado].usuario);
+    limparClipboard();
+    toast("Usuário copiado");
+}
+
+function copiarSenha() {
+    if(selecionado==null) return toast("Selecione");
+    navigator.clipboard.writeText(dados[selecionado].senha);
+    limparClipboard();
+    toast("Senha copiada ("+TEMPO_CLIPBOARD+"s)");
+}
+
+function limparClipboard() {
+    setTimeout(()=>navigator.clipboard.writeText(""),TEMPO_CLIPBOARD*1000);
+}
+
+/* ================= IMPORT / EXPORT ================= */
+async function exportar() {
+    const enc = await criptografar(JSON.stringify(dados));
+    const b = new Blob([enc],{type:"application/json"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(b);
+    a.download="vault.json";
+    a.click();
+}
+
+function importar() {
+    document.getElementById("file").click();
+}
+
+document.getElementById("file").onchange = async e => {
+    const txt = await e.target.files[0].text();
+    dados = JSON.parse(await descriptografar(txt));
+    carregarCategorias();
+    render();
+    toast("Importado");
+};
+
+/* ================= AUTH ================= */
+async function autenticar() {
+    senhaMestre = prompt("Senha mestre:");
+    if(!senhaMestre) return;
+
+    try {
+        await navigator.credentials.get({
+            publicKey:{
+                challenge:new Uint8Array(32),
+                userVerification:"required"
+            }
+        });
+        document.body.classList.remove("camuflado");
+        document.getElementById("auth").classList.add("hidden");
+        document.getElementById("app").classList.remove("hidden");
+        document.getElementById("acoes").classList.remove("hidden");
+        carregarCategorias();
+        render();
+        toast("Desbloqueado");
+    } catch {
+        toast("Falha");
+    }
+}
+</script>
+
+</body>
+</html>
